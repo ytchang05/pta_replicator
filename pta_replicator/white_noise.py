@@ -119,6 +119,8 @@ def add_measurement_noise(psr: SimulatedPulsar, efac: float = 1.0,
     psr.toas.adjust_TOAs(TimeDelta(dt.to('day')))
     psr.update_residuals()
 
+    return dt
+
 
 def add_jitter(psr: SimulatedPulsar, log10_ecorr: float,
                flagid: str = 'f', flags: list = None,
@@ -186,3 +188,5 @@ def add_jitter(psr: SimulatedPulsar, log10_ecorr: float,
 
     psr.toas.adjust_TOAs(TimeDelta(dt.to('day')))
     psr.update_residuals()
+
+    return dt

@@ -6,6 +6,7 @@ With code adapted from libstempo (Michele Vallisneri)
 """
 import glob
 import os
+import numpy as np
 from dataclasses import dataclass
 from astropy.time import TimeDelta
 
@@ -29,6 +30,7 @@ class SimulatedPulsar:
     name: str = None
     loc: dict = None
     added_signals: dict = None
+    freqs: np.array = None
 
     def __repr__(self):
         return f"SimulatedPulsar({self.name})"
@@ -59,7 +61,7 @@ class SimulatedPulsar:
         else:
             err = f"{fitter=} must be one of 'wls', 'gls', 'downhill' or 'auto'"
             raise ValueError(err)
-        
+
         self.f.fit_toas(**fitter_kwargs)
         self.model = self.f.model
         self.update_residuals()
@@ -107,6 +109,7 @@ def load_pulsar(parfile: str, timfile: str, ephem:str = 'DE440') -> SimulatedPul
     toas = toa.get_TOAs(timfile, ephem=ephem, planets=True)
     residuals = Residuals(toas, model)
     name = model.PSR.value
+    freqs = np.array(model.barycentric_radio_freq(toas), dtype="float64")
 
     if hasattr(model, 'RAJ') and hasattr(model, 'DECJ'):
         loc = {'RAJ': model.RAJ.value, 'DECJ': model.DECJ.value}
@@ -114,9 +117,8 @@ def load_pulsar(parfile: str, timfile: str, ephem:str = 'DE440') -> SimulatedPul
         loc = {'ELONG': model.ELONG.value, 'ELAT': model.ELAT.value}
     else:
         raise AttributeError("No pulsar location information (RAJ/DECJ or ELONG/ELAT) in parfile.")
-    
 
-    return SimulatedPulsar(ephem=ephem, model=model, toas=toas, residuals=residuals, name=name, loc=loc)
+    return SimulatedPulsar(ephem=ephem, model=model, toas=toas, residuals=residuals, name=name, loc=loc, freqs=freqs)
 
 
 def load_from_directories(pardir: str, timdir: str, ephem:str = 'DE440', num_psrs: int = None, debug=False) -> list:
