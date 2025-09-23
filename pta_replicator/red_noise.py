@@ -354,3 +354,4 @@ def add_gwb(
         psr.toas.adjust_TOAs(TimeDelta(dt.to('day')))
         psr.update_residuals()
         ct += 1
+    return res_gw
