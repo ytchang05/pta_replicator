@@ -7,7 +7,7 @@ from astropy import units as u
 def quantize_fast(times, flags=None, dt=1.0):
     """
     Quantize TOAs into bins of width dt.
-    Optionally take a list of TOA flags to use.
+    When flags are supplied, each time bin contains only one flag value.
 
     Parameters
     ----------
@@ -18,21 +18,33 @@ def quantize_fast(times, flags=None, dt=1.0):
     dt : float
         The width of the bins in days.
     """
-    isort = np.argsort(times)
+    times = np.asarray(times)
+    if len(times) == 0:
+        raise ValueError("Cannot quantize an empty TOA array")
+    if flags is not None:
+        flags = np.asarray(flags)
+        if len(flags) != len(times):
+            raise ValueError("One flag value is required per TOA")
+    isort = np.argsort(times, kind="stable")
 
-    bucket_ref = [times[isort[0]]]
-    bucket_ind = [[isort[0]]]
-
-    for i in isort[1:]:
-        if times[i] - bucket_ref[-1] < dt:
-            bucket_ind[-1].append(i)
+    bucket_ref = []
+    bucket_ind = []
+    bucket_flags = []
+    latest_by_flag = {}
+    for i in isort:
+        flag = None if flags is None else flags[i]
+        previous = latest_by_flag.get(flag)
+        if previous is not None and times[i] - bucket_ref[previous] < dt:
+            bucket_ind[previous].append(i)
         else:
+            latest_by_flag[flag] = len(bucket_ind)
             bucket_ref.append(times[i])
             bucket_ind.append([i])
+            bucket_flags.append(flag)
 
     avetoas = np.array([np.mean(times[ind]) for ind in bucket_ind], "d")
     if flags is not None:
-        aveflags = np.array([flags[ind[0]] for ind in bucket_ind])
+        aveflags = np.asarray(bucket_flags)
 
     U = np.zeros((len(times), len(bucket_ind)), "d")
     for i, l in enumerate(bucket_ind):
