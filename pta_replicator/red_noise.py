@@ -264,7 +264,7 @@ def add_gwb(
         psrlocs = np.zeros((Npulsars, 2))
 
         for ii in range(Npulsars):
-            if "RAJ" and "DECJ" in psrs[ii].loc:
+            if "RAJ" in psrs[ii].loc and "DECJ" in psrs[ii].loc:
                 psrlocs[ii] = float(psrs[ii].loc["RAJ"]*np.pi/12.0), float(psrs[ii].loc["DECJ"]*np.pi/180.0)
                 ## Lookout for RAJ being in hours instead of degrees
                 ## TODO: check for this in other places that use RAJ
@@ -306,7 +306,7 @@ def add_gwb(
         Amp = 10**log10_amplitude
         gam = spectral_index
 
-        f1yr = 1 / 3.16e7
+        f1yr = 1 / YEAR_IN_SEC
         alpha = -0.5 * (gam - 3)
         hcf = Amp * (f / f1yr) ** (alpha)
         if turnover:
