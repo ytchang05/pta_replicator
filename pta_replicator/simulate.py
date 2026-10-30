@@ -96,6 +96,30 @@ class SimulatedPulsar:
         """
         return Pulsar(self.toas, self.model, ephem=ephem, timing_package='pint')
 
+    def to_discovery(self, ephem='DE440'):
+        """
+        Convert to a discovery Pulsar in memory: the same arrays and metadata discovery.Pulsar.read_feather returns
+        for a feather written from to_enterprise() (no pickle or file in between); save it with .save_feather(path).
+        The arrays (TOA order, design matrix, SSB and planet positions, pulsar distance) are computed by enterprise.
+        """
+        import discovery as ds
+
+        epsr = self.to_enterprise(ephem=ephem)
+        if np.ndim(epsr._pos_t) == 1:
+            # PINT pulsars keep one SSB-to-pulsar unit vector; discovery stores it per TOA (pos_t indexes it by TOA)
+            epsr._pos_t = np.repeat(np.asarray(epsr._pos_t)[np.newaxis, :], len(epsr._isort), axis=0)
+
+        psr = ds.Pulsar()
+        for array in ds.Pulsar.columns + ds.Pulsar.vector_columns + ds.Pulsar.tensor_columns:
+            value = np.array(getattr(epsr, array))
+            setattr(psr, array, value.astype(np.float64) if value.dtype.kind == 'f' else value)
+        psr.flags = {flag: np.asarray(values).astype('U') for flag, values in epsr.flags.items()}
+        for attr in ds.Pulsar.metadata:
+            if hasattr(epsr, attr):
+                setattr(psr, attr, getattr(epsr, attr))
+        psr.mintoa, psr.maxtoa = np.min(psr.toas), np.max(psr.toas)
+        return psr
+
 
 def simulate_pulsar(parfile: str, obstimes, toaerr, freq=1440.0, observatory="AXIS", flags=None, ephem:str = 'DE440') -> SimulatedPulsar:
     """
