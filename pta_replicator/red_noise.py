@@ -36,7 +36,7 @@ def extrap1d(interpolator):
 def create_fourier_design_matrix_red(toas: np.ndarray, nmodes: int = 30,
                                   Tspan: float = None, logf: bool = False,
                                   fmin: float = None, fmax: float = None,
-                                  pshift: bool = False, modes: np.ndarray = None, pseed: bool = None) -> tuple:
+                                  pshift: bool = False, libstempo_convention: bool = True, modes: np.ndarray = None, pseed: bool = None) -> tuple:
     """
     Construct fourier design matrix from eq 11 of Lentati et al, 2013
 
@@ -49,6 +49,7 @@ def create_fourier_design_matrix_red(toas: np.ndarray, nmodes: int = 30,
     fmin [float]: Lower sampling frequency.
     fmax [float]: Upper sampling frequency.
     pshift [bool]: Option to add random phase shift.
+    libstempo_convention [bool]: Use libstempo's convention where toas-toas[0] is used in F matrix instead of just toas, and cosine comes before sine
     modes [array]: Option to provide explicit list or array of sampling frequencies.
 
     Returns
@@ -78,16 +79,9 @@ def create_fourier_design_matrix_red(toas: np.ndarray, nmodes: int = 30,
         else:
             f = np.linspace(fmin, fmax, nmodes)
 
-    # if requested, add random phase shift to basis functions
-    if pshift or pseed is not None:
-        if pseed is not None:
-            # use the first toa to make a different seed for every pulsar
-            seed = int(toas[0] / 17) + int(pseed)
-            np.random.seed(seed)
-
-        ranphase = np.random.uniform(0.0, 2 * np.pi, nmodes)
-    else:
-        ranphase = np.zeros(nmodes)
+    # add random phase shift to basis functions
+    ranphase = (np.random.uniform(0.0, 2 * np.pi, nmodes)
+                if pshift else np.zeros(nmodes))
 
     Ffreqs = np.repeat(f, 2)
 
@@ -95,11 +89,18 @@ def create_fourier_design_matrix_red(toas: np.ndarray, nmodes: int = 30,
     F = np.zeros((N, 2 * nmodes))
 
     # The sine/cosine modes
-    F[:, ::2] = np.sin(2 * np.pi * toas[:, None] * f[None, :] + ranphase[None, :])
-    F[:, 1::2] = np.cos(2 * np.pi * toas[:, None] * f[None, :] + ranphase[None, :])
+    if libstempo_convention:
+        F[:,::2] = np.cos(2*np.pi*(toas[:,None]-toas[0,None])*f[None,:] +
+                          ranphase[None,:])
+        F[:,1::2] = np.sin(2*np.pi*(toas[:,None]-toas[0,None])*f[None,:] +
+                           ranphase[None,:])
+    else:
+        F[:,::2] = np.sin(2*np.pi*toas[:,None]*f[None,:] +
+                          ranphase[None,:])
+        F[:,1::2] = np.cos(2*np.pi*toas[:,None]*f[None,:] +
+                           ranphase[None,:])
 
     return F, Ffreqs
-
 
 def create_fourier_design_matrix_general(
     toas,
@@ -119,6 +120,7 @@ def create_fourier_design_matrix_general(
     modes=None,
     pshift=None,
     pseed=None,
+    libstempo_convention=True
 ):
     """
     Construct fourier design matrix with possibility of adding selection and/or chromatic index envelope.
@@ -146,7 +148,7 @@ def create_fourier_design_matrix_general(
 
     # get base fourier design matrix and frequencies
     F, Ffreqs = create_fourier_design_matrix_red(
-        toas, nmodes=nmodes, Tspan=Tspan, logf=logf, fmin=fmin, fmax=fmax, modes=modes, pshift=pshift, pseed=pseed
+        toas, nmodes=nmodes, Tspan=Tspan, logf=logf, fmin=fmin, fmax=fmax, modes=modes, pshift=pshift, pseed=pseed, libstempo_convention=libstempo_convention
     )
 
     # compute the chromatic-variation vectors
@@ -165,12 +167,10 @@ def create_fourier_design_matrix_general(
 
 def add_noise(psr: SimulatedPulsar, log10_amplitude: float, spectral_index: float, noise="red_noise", idx=None,
                   components: int = 30, seed: int = None,
-                  modes: np.ndarray = None, Tspan: float = None, libstempo_convention: bool = False):
+                  modes: np.ndarray = None, Tspan: float = None, libstempo_convention: bool = True):
     """Add red noise with P(f) = A^2 / (12 pi^2) (f * year)^-gamma,
     using `components` Fourier bases.
     Optionally take a pseudorandom-number-generator seed."""
-    psr.update_added_signals('{}_{}'.format(psr.name, noise),
-                             {'amplitude': log10_amplitude, 'spectral_index': spectral_index})
     A = 10**(log10_amplitude)
     gamma = spectral_index
     # nobs = len(psr.toas.table)
@@ -184,10 +184,15 @@ def add_noise(psr: SimulatedPulsar, log10_amplitude: float, spectral_index: floa
 
     toas = np.array(psr.toas.table['tdbld'], dtype='float64') * DAY_IN_SEC #to sec
     Tspan = toas.max() - toas.min()
-    F, freqs = create_fourier_design_matrix_general(toas, Tspan=Tspan, nmodes=components, modes=modes, idx=idx, freqs=psr.freqs, flags=[])
+    F, freqs = create_fourier_design_matrix_general(toas, Tspan=Tspan, nmodes=components, modes=modes, idx=idx, freqs=psr.freqs, flags=[], libstempo_convention=libstempo_convention)
     prior = A**2 * (freqs/fyr)**(-gamma) / (12 * np.pi**2 * Tspan) * YEAR_IN_SEC**3
     y = np.sqrt(prior) * np.random.randn(freqs.size)
     dt = np.dot(F,y) * u.s
+
+    psr.update_added_signals('{}_{}'.format(psr.name, noise),
+                             {'amplitude': log10_amplitude, 'spectral_index': spectral_index},
+                             dt)
+
     psr.toas.adjust_TOAs(TimeDelta(dt.to('day')))
     psr.update_residuals()
     return dt
@@ -229,9 +234,6 @@ def add_gwb(
     :param howml: Lowest frequency is 1/(howml * T)
     :returns: list of residuals for each pulsar
     """
-    for psr in psrs:
-        psr.update_added_signals('{}_gwb'.format(psr.name), 
-                                 {'amplitude': log10_amplitude, 'spectral_index': spectral_index})
 
     if seed is not None:
         np.random.seed(seed)
@@ -352,6 +354,9 @@ def add_gwb(
     for psr in psrs:
         dt = res_gw[ct] / 86400.0 * u.day
         psr.toas.adjust_TOAs(TimeDelta(dt.to('day')))
+        psr.update_added_signals('{}_gwb'.format(psr.name),
+                                 {'amplitude': log10_amplitude, 'spectral_index': spectral_index},
+                                 dt)
         psr.update_residuals()
         ct += 1
     return res_gw
